@@ -11,10 +11,10 @@ const ContactForm = () => {
 
     const [errors, setErrors] = useState({});
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [submitMessage, setSubmitMessage] = useState('');
     const [activeField, setActiveField] = useState('');
     const [fieldValidation, setFieldValidation] = useState({});
     const [isFormValid, setIsFormValid] = useState(false);
+    const [toast, setToast] = useState({ show: false, message: '', type: '' });
 
     const validateEmail = (email) => {
         const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -34,6 +34,14 @@ const ContactForm = () => {
     const validateMessage = (message) => {
         const trimmedMessage = message.trim();
         return trimmedMessage.length >= 10 && trimmedMessage.length <= 500;
+    };
+
+    // Toast message function
+    const showToast = (message, type = 'success') => {
+        setToast({ show: true, message, type });
+        setTimeout(() => {
+            setToast({ show: false, message: '', type: '' });
+        }, 4000); // Hide after 4 seconds
     };
 
     const validateField = (fieldName, value) => {
@@ -105,28 +113,71 @@ const ContactForm = () => {
         e.preventDefault();
 
         if (!validateForm()) {
+            console.log('Form validation failed');
             return;
         }
 
         setIsSubmitting(true);
-        setSubmitMessage('');
+
+        // Clean and prepare data - remove any potential hidden characters
+        // eslint-disable-next-line no-control-regex
+        const controlCharRegex = /[\u0000-\u001F\u007F-\u009F]/g;
+        const requestData = {
+            name: formData.name.trim().replace(controlCharRegex, ''),
+            email: formData.email.trim().replace(controlCharRegex, ''),
+            phone: formData.phone.trim().replace(/\D/g, ''),
+            message: formData.message.trim().replace(controlCharRegex, '')
+        };
+
+        console.log('🚀 Submitting form with data:', requestData);
+
+        // Debug each field
+        console.log('Name chars:', Array.from(requestData.name).map(c => c.charCodeAt(0)));
+        console.log('Email chars:', Array.from(requestData.email).map(c => c.charCodeAt(0)));
+        console.log('Phone chars:', Array.from(requestData.phone).map(c => c.charCodeAt(0)));
+        console.log('Message chars:', Array.from(requestData.message).map(c => c.charCodeAt(0)));
+
+        // Create JSON body and log it
+        const jsonBody = JSON.stringify(requestData);
+        console.log('📝 JSON Body:', jsonBody);
+        console.log('📝 JSON Body length:', jsonBody.length);
+        console.log('📝 JSON Body chars:', Array.from(jsonBody).map(c => c.charCodeAt(0)));
 
         try {
             const response = await fetch('https://vernanbackend.ezlab.in/api/contact-us/', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Accept': 'application/json',
                 },
-                body: JSON.stringify({
-                    name: formData.name,
-                    email: formData.email,
-                    phone: formData.phone,
-                    message: formData.message
-                })
+                body: jsonBody
             });
 
-            if (response.status === 200) {
-                setSubmitMessage('Form Submitted');
+            console.log('📡 Response received:');
+            console.log('Status:', response.status);
+            console.log('Status Text:', response.statusText);
+            console.log('OK:', response.ok);
+            console.log('Headers:', Object.fromEntries(response.headers.entries()));
+
+            // Get response text first
+            const responseText = await response.text();
+            console.log('Response Text:', responseText);
+
+            // Check if response is ok (status 200-299)
+            if (response.ok) {
+                console.log('✅ Success! Response is OK');
+
+                // Try to parse response as JSON
+                let responseData;
+                try {
+                    responseData = JSON.parse(responseText);
+                    console.log('Response JSON:', responseData);
+                } catch (jsonError) {
+                    console.log('Response is not JSON, but submission was successful');
+                }
+
+                // Show success toast and clear form
+                showToast('Form submitted successfully! 🎉', 'success');
                 setFormData({
                     name: '',
                     email: '',
@@ -137,10 +188,50 @@ const ContactForm = () => {
                 setFieldValidation({});
                 setIsFormValid(false);
             } else {
-                setSubmitMessage('Something went wrong. Please try again.');
+                console.log('❌ Error! Response not OK');
+
+                // Try to get error message from response
+                let errorMessage = `Something went wrong. Please try again. (Status: ${response.status})`;
+                try {
+                    const errorData = JSON.parse(responseText);
+                    console.log('Error Data:', errorData);
+                    if (errorData.message) {
+                        errorMessage = errorData.message;
+                    } else if (errorData.error) {
+                        errorMessage = errorData.error;
+                    } else if (errorData.detail) {
+                        errorMessage = errorData.detail;
+                    }
+                } catch (jsonError) {
+                    console.log('Error response is not JSON');
+                    if (responseText) {
+                        errorMessage = `Server error: ${responseText.substring(0, 100)}`;
+                    }
+                }
+
+                showToast(errorMessage, 'error');
+                console.error('API Error:', response.status, response.statusText);
             }
         } catch (error) {
-            setSubmitMessage('Network error. Please check your connection.');
+            console.error('🔥 Network Error:', error);
+            console.error('Error name:', error.name);
+            console.error('Error message:', error.message);
+            console.error('Error stack:', error.stack);
+
+            let errorMessage = 'An unexpected error occurred. Please try again.';
+
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                errorMessage = 'Network error. Please check your internet connection.';
+            } else if (error.name === 'AbortError') {
+                errorMessage = 'Request timed out. Please try again.';
+            } else if (error.message.includes('CORS')) {
+                errorMessage = 'CORS error. Please contact support.';
+            } else if (error.message.includes('Failed to fetch')) {
+                errorMessage = 'Failed to connect to server. Please check your connection.';
+            }
+
+            showToast(errorMessage, 'error');
+            console.error('Form submission error:', errorMessage);
         } finally {
             setIsSubmitting(false);
         }
@@ -162,7 +253,7 @@ const ContactForm = () => {
 
         // Real-time validation
         const validation = validateField(name, processedValue);
-        
+
         setFieldValidation(prev => ({
             ...prev,
             [name]: validation.isValid
@@ -201,10 +292,10 @@ const ContactForm = () => {
 
     const handleBlur = (e) => {
         setActiveField('');
-        
+
         const { name, value } = e.target;
         const validation = validateField(name, value);
-        
+
         if (!validation.isValid && value.trim() !== '') {
             setErrors(prev => ({
                 ...prev,
@@ -242,7 +333,7 @@ const ContactForm = () => {
         const hasValue = formData[fieldName].trim() !== '';
         const isValid = fieldValidation[fieldName];
         const hasError = errors[fieldName];
-        
+
         if (hasError) return 'error';
         if (hasValue && isValid) return 'valid';
         if (hasValue && !isValid) return 'invalid';
@@ -289,8 +380,8 @@ const ContactForm = () => {
                             Form Completion: {Math.round(calculateProgress())}%
                         </div>
                         <div className="progress-bar">
-                            <div 
-                                className="progress-fill" 
+                            <div
+                                className="progress-fill"
                                 style={{ width: `${calculateProgress()}%` }}
                             ></div>
                         </div>
@@ -301,7 +392,7 @@ const ContactForm = () => {
                             <input
                                 type="text"
                                 name="name"
-                                placeholder="Your name* (2-50 characters)"
+                                placeholder="Your name*"
                                 value={formData.name}
                                 onChange={handleChange}
                                 onFocus={handleFocus}
@@ -322,7 +413,7 @@ const ContactForm = () => {
                             <input
                                 type="email"
                                 name="email"
-                                placeholder="Your email* (e.g., name@domain.com)"
+                                placeholder="Your email*"
                                 value={formData.email}
                                 onChange={handleChange}
                                 onFocus={handleFocus}
@@ -343,7 +434,7 @@ const ContactForm = () => {
                             <input
                                 type="tel"
                                 name="phone"
-                                placeholder="Phone* (numbers only, 10-15 digits)"
+                                placeholder="Phone*"
                                 value={formData.phone}
                                 onChange={handleChange}
                                 onKeyDown={handlePhoneKeyPress}
@@ -366,14 +457,14 @@ const ContactForm = () => {
                         <div className="input-container">
                             <textarea
                                 name="message"
-                                placeholder="Your message* (10-500 characters)"
+                                placeholder="Your message*"
                                 value={formData.message}
                                 onChange={handleChange}
                                 onFocus={handleFocus}
                                 onBlur={handleBlur}
                                 required
                                 className={`form-textarea ${activeField === 'message' ? 'active' : ''} ${getFieldStatus('message')}`}
-                                rows="4"
+                                rows="3"
                             />
                             {getFieldStatus('message') === 'valid' && (
                                 <span className="validation-icon valid">✓</span>
@@ -384,19 +475,13 @@ const ContactForm = () => {
                         </div>
                         {errors.message && <span className="error-message">{errors.message}</span>}
 
-                        <button 
-                            type="submit" 
-                            className={`submit-btn ${isFormValid ? 'ready' : ''}`} 
+                        <button
+                            type="submit"
+                            className={`submit-btn ${isFormValid ? 'ready' : ''}`}
                             disabled={isSubmitting || !isFormValid}
                         >
-                            {isSubmitting ? 'Submitting...' :  'Submit Form'}
+                            {isSubmitting ? 'Submitting...' : 'Submit'}
                         </button>
-
-                        {submitMessage && (
-                            <div className={`submit-message ${submitMessage === 'Form Submitted' ? 'success' : 'error'}`}>
-                                {submitMessage}
-                            </div>
-                        )}
                     </form>
 
                     <div className="contact-info">
@@ -410,6 +495,21 @@ const ContactForm = () => {
                     </div>
                 </div>
             </main>
+
+            {/* Toast Notification */}
+            {toast.show && (
+                <div className={`toast toast-${toast.type}`}>
+                    <div className="toast-content">
+                        <span className="toast-message">{toast.message}</span>
+                        <button
+                            className="toast-close"
+                            onClick={() => setToast({ show: false, message: '', type: '' })}
+                        >
+                            ×
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
